@@ -4,7 +4,7 @@ import numpy as np
 import random
 from joblib import Parallel, delayed
 from sklearn import svm
-
+from tqdm import tqdm
 class DecisionTree:
     def __init__(self, maxDepth=8, nt=50, split_fn='F', repeat=10, minDataNum=2, dim_SVM = -1):
         assert maxDepth > 0
@@ -25,9 +25,8 @@ class DecisionTree:
     def build_node(self, features, labels, index, depth, maxLabel):
         if depth >= self.maxDepth or features.shape[0] < self.minDataNum or len(np.unique(labels)) <= 1:
             self.node.update({str(index) + '_node': 'leaf'})
-
-            PMF = np.divide(np.histogram(labels, range(0, maxLabel + 2)), labels.size)
-            self.node.update({str(index) + '_PMF': PMF[0]})
+            PMF = np.histogram(labels, range(0, maxLabel + 2)) [0] / labels.size
+            self.node.update({str(index) + '_PMF': PMF})
             return
 
         base_ent = util.getEntropy(labels)
@@ -50,11 +49,11 @@ class DecisionTree:
 
             elif self.split_fn == 'S':
                 dim = np.random.permutation(features.shape[1])
-                dim = dim[0:self.dim_SVM]
+                dim = dim[0: self.dim_SVM]
                 f = features[:, dim]
                 pseudo_labels = util.getBinaryPseudoLabels(labels)
                 clf = svm.LinearSVC()
-                clf.fit(f,pseudo_labels)
+                clf.fit(f, pseudo_labels)
                 score = clf.decision_function(f)
                 mv = np.median(score)
 
@@ -100,8 +99,7 @@ class DecisionTree:
     def build_tree(self, features, labels):
         depth = 0
         labels = np.ravel(labels)
-        prior = np.divide(np.histogram(labels, range(0, int(np.max(labels)) + 2)), labels.size)
-        self.prior = prior[0]
+        self.prior = np.histogram(labels, range(0, int(np.max(labels)) + 2))[0] / labels.size
         self.build_node(features, labels, 0, depth, int(np.max(labels)))
 
     def predict(self, feature, index=0):
@@ -152,11 +150,13 @@ class RandomForest:
 
         #self.trees = [
         #    build_tree_thread(self.maxDepth, self.nt, self.split_fn, self.repeat, self.minDataNum, self.dim_SVM,
-        #                      features, labels) for i in range(0, self.nt)]
+        #                      features, labels)                                           for i in tqdm(range(self.nt), total=self.nt,
+        #                                                         desc='Random forest build')]
 
-        self.trees = Parallel(n_jobs=4)( delayed(build_tree_thread)\
-            (self.maxDepth, self.nt, self.split_fn, self.repeat, self.minDataNum, self.dim_SVM, features, labels)\
-            for i in range(0, self.nt))
+        self.trees = Parallel(n_jobs=32)(delayed(build_tree_thread)\
+            (self.maxDepth, self.nt, self.split_fn, self.repeat, self.minDataNum, self.dim_SVM, features, labels) \
+                                          for i in tqdm(range(self.nt), total=self.nt,
+                                                        desc='Random forest build'))
 
 
 
@@ -164,11 +164,9 @@ class RandomForest:
         PMF = 0
         for i in range(0, self.nt):
             PMF = PMF + self.trees[i].predict(feature, index=0)
-
         return PMF
 
-
-def build_tree_thread( maxDepth, nt, split_fn, repeat, minDataNum, dim_SVM, features, labels):
+def build_tree_thread(maxDepth, nt, split_fn, repeat, minDataNum, dim_SVM, features, labels):
     tree = DecisionTree(maxDepth, nt, split_fn, repeat, minDataNum, dim_SVM)
     tree.build_tree(features, labels)
     return tree
